@@ -47,10 +47,15 @@ function analyzeTrades(trades) {
                 .dividedBy(new BigNumber(existingPosition.quantity))
                 .toString();
 
+          // Avoiding division by zero or a very small number
+          const new_delta_price_usd = (new BigNumber(token_out.amount_out).isGreaterThan(0))
+              ? new BigNumber(totalCost).dividedBy(new BigNumber(token_out.amount_out)).toString()
+              : '0';
+
         // handle position event
         handlePositionEvent(positionHistory, "increase position", trade.transaction_address, trade.timestamp, token_out, {
           quantity: token_out.amount_out,
-          price_usd: existingPosition.price_usd,
+          price_usd: new_delta_price_usd,
 		  gas_fee_usd: trade.gas_fee_usd
         });
 
@@ -86,10 +91,10 @@ function analyzeTrades(trades) {
         console.warn(`Attempting to close a non-existent position for ${token_in.symbol}. Ignoring this operation.`);
         return { profit: '0', cost: '0' };
     }
-    
+
     if (new BigNumber(existingPosition.quantity).isLessThan(new BigNumber(token_in.amount_in))) {
         console.warn(`Attempting to sell more than available for ${token_in.symbol}. Only selling the available amount.`);
-        
+
         const adjustmentRatio = new BigNumber(existingPosition.quantity).dividedBy(token_in.amount_in);
 
         token_in.amount_in = existingPosition.quantity;
@@ -114,15 +119,15 @@ function analyzeTrades(trades) {
         .toString();
 
     // Avoiding division by zero or a very small number
-    const price_usd = (new BigNumber(token_in.amount_in).isGreaterThan(0)) 
-        ? new BigNumber(revenue).dividedBy(new BigNumber(token_in.amount_in)).toString() 
+    const price_usd = (new BigNumber(token_in.amount_in).isGreaterThan(0))
+        ? new BigNumber(revenue).dividedBy(new BigNumber(token_in.amount_in)).toString()
         : '0';
 
     handlePositionEvent(positionHistory, "sell", trade.transaction_address, trade.timestamp, token_in, {
         quantity: token_in.amount_in,
         price_usd: price_usd,
         gas_fee_usd: trade.gas_fee_usd,
-        profit: profit 
+        profit: profit
     });
 
     return { profit: profit, cost: cost };
@@ -149,10 +154,10 @@ function analyzeTrades(trades) {
 		totalCost += results.cost;
       });
     }
-  });  
+  });
 
   return {
-    totalProfit,	    
+    totalProfit,
     positions,
     positionHistory
   };
@@ -171,7 +176,7 @@ async function generateReportList(positionHistory) {
         return acc;
     }, {});
 
-    const tokenAddresses = Object.keys(groupedPositions); 
+    const tokenAddresses = Object.keys(groupedPositions);
 
     try {
         const { prices, volumes, liquidities } = await fetchTokenPricesInBatches(tokenAddresses);
@@ -240,7 +245,7 @@ async function generateReportList(positionHistory) {
         const tokenPrice = new BigNumber(prices[tokenAddress] || 0.0000000001);
         const tokenLiquidity = usdLiquidity.div(tokenPrice);
         const amountIn = new BigNumber(reportItem.delta);
-        
+
         if (amountIn.isZero() || tokenLiquidity.isZero()) {
             reportItem.deltaUsd = new BigNumber(0);
         } else {
@@ -248,15 +253,15 @@ async function generateReportList(positionHistory) {
                 let numerator = amountIn.times(usdLiquidity);
                 let denominator = tokenLiquidity.plus(amountIn);
                 let amountOut = numerator.div(denominator);
-        
+
                 reportItem.deltaUsd = amountOut;
             } catch (error) {
                 reportItem.deltaUsd = new BigNumber(0);
             }
         }
-        
-        
-              
+
+
+
 
         reportItem.deltaPNLUsd = reportItem.deltaUsd.plus(reportItem.soldSumUsd).minus(reportItem.boughtSumUsd);
         reportItem.deltaPNLPercentage = reportItem.boughtSumUsd.isEqualTo(0) ? new BigNumber(0) : reportItem.deltaPNLUsd.dividedBy(reportItem.boughtSumUsd).times(100);
@@ -282,7 +287,7 @@ function formReportSummary(trades, reportList, address) {
         const date = new Date(timestamp * 1000); // Convert to milliseconds
         return `${date.getDate()}.${date.getMonth()+1}.${date.getFullYear()} / ${date.getHours()}:${date.getMinutes()}:${date.getSeconds()}`;
     }
-	
+
 // Helper function to check if a string can be converted to a valid number
 function isValidNumber(str) {
     try {
@@ -293,7 +298,7 @@ function isValidNumber(str) {
     }
 }
 
-    
+
 // Filter uList
 const uList = [...reportList].filter(item => {
     return (
@@ -351,7 +356,7 @@ const rList = [...reportList].filter(item => {
         const PNL_R = new BigNumber(item.PNL_R);
         totalRealizedUSD = totalRealizedUSD.plus(PNL_R);
         PNL_R_boughtSumUsd = PNL_R_boughtSumUsd.plus(item.PNL_R_boughtSumUsd);
-        
+
         if (PNL_R.isGreaterThan(0)) profitableRealizedTrades++;
         else if (PNL_R.isLessThan(0)) unprofitableRealizedTrades++;
     });
@@ -360,11 +365,11 @@ const rList = [...reportList].filter(item => {
         const PNL_UR = new BigNumber(item.PNL_UR);
         totalUnrealizedUSD = totalUnrealizedUSD.plus(PNL_UR);
         PNL_UR_boughtSumUsd = PNL_UR_boughtSumUsd.plus(item.PNL_UR_boughtSumUsd);
-        
+
         if (PNL_UR.isGreaterThan(0)) profitableUnrealizedTrades++;
         else if (PNL_UR.isLessThan(0)) unprofitableUnrealizedTrades++;
     });
-	
+
 	// Compute the average PnL percentage for realized
 const averageRealizedPNLPercentage = rList
     .map(item => new BigNumber(item.PNL_R_P))
@@ -385,7 +390,7 @@ const summaryData = {
     firstTrade: formatDate(trades[0].timestamp),
     lastTrade: formatDate(trades[trades.length - 1].timestamp),
     totalTrades: trades.length,
-    totalTokens: new Set(reportList.map(item => item.symbol)).size, 
+    totalTokens: new Set(reportList.map(item => item.symbol)).size,
     buys: totalBuys.toNumber(),
     sells: totalSells.toNumber(),
     converts: totalConverts.toNumber(),
@@ -405,7 +410,7 @@ const summaryData = {
     return summaryData;
 }
 
-module.exports = {  
+module.exports = {
   analyzeTrades,
   generateReportList,
   formReportSummary
