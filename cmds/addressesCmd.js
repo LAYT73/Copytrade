@@ -179,7 +179,6 @@ async function addressesCmd(ctx) {
                 return structuredSummaryData;
             }
             const result = await analyzeAndSummarizeData(transformedData);
-            console.log(transformedData);
             console.log(`Finished analyzing and summarizing trades.`);
             console.log(`Generating Excel report...`);
             filename = await excelService.generateExcel(result);

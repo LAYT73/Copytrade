@@ -1,9 +1,10 @@
 const fs = require('fs');
 const readline = require('readline');
 const csv = require('fast-csv');
-const {axiosBinance, axiosMoralis, axiosDexguru, axiosBitquery} = require('../utils/axiosConfig'); 
 const stablecoins = process.env.STABLECOINS.split(',');
 const wrappedEther = process.env.WRAPPEDETHER;
+const {axiosBinance, axiosMoralis, axiosDexguru, axiosBitquery} = require('../utils/axiosConfig'); 
+const { log } = require('console');
 
 async function callBitqueryAPI(endpoint, query, parameters) {
   try {
@@ -152,30 +153,10 @@ async function getTokenPrice(address, timestamp, block) {
             timeInterval {
               minute(count:1440)
             }
-            tradeIndex
-            protocol
-            exchange {
-              fullName
-            }
-            baseCurrency {
-              symbol
-              address
-            }
             baseAmount
             baseAmountInUSD: baseAmount(in: USD)
-            quoteCurrency {
-              symbol
-              address
-            }
             quoteAmount
             quoteAmountInUSD: quoteAmount(in: USD)
-            trades: count
-            quotePrice
-            average_price: quotePrice(calculate: average)
-            maximum_price: quotePrice(calculate: maximum)
-            minimum_price: quotePrice(calculate: minimum)
-            open_price: minimum(of: block, get: quote_price)
-            close_price: maximum(of: block, get: quote_price)
             averagePriceInUSD: expression(get: "quoteAmountInUSD/baseAmount")
           }
         }
@@ -194,20 +175,12 @@ async function getTokenPrice(address, timestamp, block) {
   
       const bitQueryResponse = await callBitqueryAPI(endpoint, query, parameters);
 
-      // console.log(dexGuruResponse.data.data);
-      // console.log(bitQueryResponse.data.ethereum.dexTrades, iso8601DateTime, timestamp);
+      console.log(bitQueryResponse.data.ethereum.dexTrades, iso8601DateTime, timestamp);
       if (bitQueryResponse.data && bitQueryResponse.data.ethereum.dexTrades.length > 0 && parseFloat(bitQueryResponse.data.ethereum.dexTrades[0].averagePriceInUSD) !== 0) {
           return parseFloat(bitQueryResponse.data.ethereum.dexTrades[0].averagePriceInUSD);
       } else {
           throw new Error('BitQuery price invalid');
       }
-
-      // if (dexGuruResponse.data && dexGuruResponse.data.data.length > 0 && dexGuruResponse.data.data[0].price_usd !== 0) {
-      //     return dexGuruResponse.data.data[0].price_usd;
-      // } else {
-      //     // If DexGuru failed, fallback to Moralis
-      //     throw new Error('DexGuru price invalid');
-      // }
   } catch (error) {
   //     // If DexGuru fails, try Moralis
   //     try {
@@ -232,7 +205,6 @@ async function getTokenPrice(address, timestamp, block) {
 }
 
 async function fetchTokenPricesInBatches(tokenAddresses, batchSize = 100) {
-  // Function to split the array of addresses into chunks
   const chunkArray = (arr, size) =>
       Array.from({
               length: Math.ceil(arr.length / size)
@@ -240,27 +212,25 @@ async function fetchTokenPricesInBatches(tokenAddresses, batchSize = 100) {
           arr.slice(i * size, i * size + size)
       );
 
-  // Split the tokenAddresses into batches
   const addressBatches = chunkArray(tokenAddresses, batchSize);
-  console.log(addressBatches);
-  // Map each batch to a fetch promise and execute in parallel
+  
   const fetchPromises = addressBatches.map(batch => {
       const url = `https://api.dev.dex.guru/v1/chain/1/tokens/market?token_addresses=${batch.join('%2C')}&order=asc&limit=100&offset=0`;
       return axiosDexguru.get(url);
   });
 
-  // Await all fetch promises in parallel
   const results = await Promise.allSettled(fetchPromises);
   const prices = {};
   const volumes = {};
   const liquidities = {};
 
-  // Process each result
   results.forEach(result => {
       if (result.status === 'fulfilled' && result.value.data.data) {
           result.value.data.data.forEach(item => {
-              prices[item.address] = item.price_usd;
+              console.log((item.price_usd * result.value.data.data.length) < (3 * item.liquidity), item.price_usd, result.value.data.data.length, item.liquidity, item.liquidity_usd);
+              // prices[item.address] = (item.price_usd * result.value.data.data.length) < (3 * item.liquidity) ? 0 : item.price_usd;
               volumes[item.address] = item.volume_24h_usd;
+              prices[item.address] = item.price_usd;
               liquidities[item.address] = item.liquidity_usd;
           });
       }
@@ -303,7 +273,6 @@ async function assignPricesToTrades(transformedData, allDataResults) {
   
   rl.on('close', () => {
     console.log(parsedKlines[0]);
-    // Process the parsedKlines array
   });
 
   for (const transactions of Object.values(transformedData)) {
@@ -335,7 +304,6 @@ async function assignPricesToTrades(transformedData, allDataResults) {
         } else if (token.address === wrappedEther) {
           try {
             token.price_usd = await findAveragePriceByTimestamp(transaction.timestamp, parsedKlines);
-            
           } catch (error) {
             console.error('Error finding average price by timestamp:', error.message);
             token.price_usd = 0;

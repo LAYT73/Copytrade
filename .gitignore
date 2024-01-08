@@ -1,4 +1,5 @@
 node_modules/
+excel_dump/
 .env
 .DS_Store
 *.log
