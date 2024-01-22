@@ -153,7 +153,7 @@ async function getTokenPrice(tokenAddress, timestamp, block) {
         let timeDifference = now - new Date(lastUpdateDate);
         if (timeDifference <= PRICE_CACHE_UPDATE_TIME) {
             let price = PRICE_MAP[tokenAddress].price;
-            console.log("CACHED PRICE: ", price)
+            console.log(`CACHED Price found. Token ${tokenAddress}, Price Usd: ${price}`);
             return price;
         }
     }
