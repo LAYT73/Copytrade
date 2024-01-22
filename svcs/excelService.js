@@ -61,15 +61,15 @@ exports.generateExcel = async (structuredSummaryData) => {
     const summaryWorksheet = workbook.addWorksheet('Summaries');
 	const reportListWorksheet = workbook.addWorksheet('Report');
 	const tradesWorksheet = workbook.addWorksheet('Trades');
-	
+
 summaryWorksheet.columns = [
  { header: 'Wallet', key: 'wallet' },
  { header: 'Total Trades', key: 'totalTrades' },
  { header: 'Total Tokens', key: 'totalTokens' },
- { header: 'Winrate Realized %', key: 'winrateRealizedPercentage' }, 
+ { header: 'Winrate Realized %', key: 'winrateRealizedPercentage' },
  { header: 'Num Realized Trades', key: 'numRealizedTrades' },
- { header: 'Winrate Unrealized%', key: 'winrateUnrealizedPercentage' }, 
- { header: 'Num Unrealized Trades', key: 'numUnrealizedTrades' }, 
+ { header: 'Winrate Unrealized%', key: 'winrateUnrealizedPercentage' },
+ { header: 'Num Unrealized Trades', key: 'numUnrealizedTrades' },
  { header: 'PnL R', key: 'PnL_R' },
  { header: 'PnL R%', key: 'PnL_R_Percentage' },
  { header: 'Average Realized%', key: 'averageRealizedPercentage' },
@@ -129,7 +129,7 @@ Object.entries(structuredSummaryData).forEach(([address, data]) => {
   // Now you can use summaryData, reportList, and trades as variables here for the current address
   // Example operation:
   // console.log(wallet, summaryData, reportList, trades);
-  debugger;
+  // debugger;
   summaryWorksheet.addRow({
     wallet: wallet,
     firstTrade: summaryData.firstTrade,
@@ -151,10 +151,10 @@ Object.entries(structuredSummaryData).forEach(([address, data]) => {
     numRealizedTrades: summaryData.numRealizedTrades,
     numUnrealizedTrades: summaryData.numUnrealizedTrades
   });
-  
+
     // Add the data from the report list
 reportList.forEach((entry) => {
-    reportListWorksheet.addRow({        
+    reportListWorksheet.addRow({
         wallet: wallet,
         symbol: entry.symbol,
         address: entry.address,
@@ -175,15 +175,15 @@ reportList.forEach((entry) => {
     });
 });
 
-  // Trades worksheet    
+  // Trades worksheet
   trades.forEach((trade) => {
-    const row = {        
+    const row = {
         wallet: wallet,
       chain_id: trade.chain_id,
       direction: trade.direction,
       transaction_address: trade.transaction_address,
       timestamp: trade.timestamp,
-      block_number: trade.blockNumber,      
+      block_number: trade.blockNumber,
       gas_fee_usd: trade.gas_fee_usd,
       token_in_address: trade.tokens_in[0].address,
       token_in_symbol: trade.tokens_in[0].symbol,
@@ -195,7 +195,7 @@ reportList.forEach((entry) => {
 
     tradesWorksheet.addRow(row);
   });
-  
+
 
   countEntries++;
 });
@@ -225,7 +225,7 @@ reportList.forEach((entry) => {
             ySplit: 1 // Freezing after the third row (which is our header row)
         }
     ];
-  
+
 
   // Format the date and file name
   const date = new Date();

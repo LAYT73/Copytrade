@@ -5,9 +5,10 @@ const stablecoins = process.env.STABLECOINS.split(',');
 const wrappedEther = process.env.WRAPPEDETHER;
 const {axiosBinance, axiosMoralis, axiosDexguru, axiosBitquery} = require('../utils/axiosConfig');
 const { log } = require('console');
+const { CovalentClient } = require("@covalenthq/client-sdk");
 
-const USDT_ADDRESS = "0xdAC17F958D2ee523a2206206994597C13D831ec7"
-const USDC_ADDRESS = "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"
+PRICE_MAP = {} // {tokenAddress: {price, lastUpdateDate}}
+const PRICE_CACHE_UPDATE_TIME = 24 * 1000 * 60 * 60; // 24 hours in milliseconds
 
 async function callBitqueryAPI(endpoint, query, parameters) {
   try {
@@ -143,79 +144,38 @@ function findAveragePriceByTimestamp(timestamp, klines) {
   return null;
 }
 
-async function getTokenPrice(baseAddress, tokenAddress, timestamp, block) {
-  try {
-      const endpoint = 'https://graphql.bitquery.io';
-      const query = `query MyQuery($baseAddress: String!, $tokenAddress: String!, $from: ISO8601DateTime, $till: ISO8601DateTime) {
-        ethereum(network: ethereum) {
-          dexTrades(
-            options: {limit: 6, asc: "timeInterval.minute"}
-            time: {since: $from, till: $till},
-            baseCurrency: {is: $baseAddress},
-            quoteCurrency: {is: $tokenAddress}
-          ) {
-            timeInterval {
-              minute(count:1440)
-            }
-            baseAmount
-            baseAmountInUSD: baseAmount(in: USD)
-            quoteAmount
-            quoteAmountInUSD: quoteAmount(in: USD)
-            averagePriceInUSD: expression(get: "quoteAmountInUSD/baseAmount")
-          }
+async function getTokenPrice(tokenAddress, timestamp, block) {
+    let now = new Date();
+
+    let lastTokenPrice = PRICE_MAP[tokenAddress];
+    if (lastTokenPrice && lastTokenPrice.lastUpdateDate) {
+        let lastUpdateDate = PRICE_MAP[tokenAddress].lastUpdateDate;
+        let timeDifference = now - new Date(lastUpdateDate);
+        if (timeDifference <= PRICE_CACHE_UPDATE_TIME) {
+            let price = PRICE_MAP[tokenAddress].price;
+            console.log("CACHED PRICE: ", price)
+            return price;
         }
-      }
-      `;
+    }
 
-      const now = new Date();
-      const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000); // subtract 10 days from the current date
+    try {
+       const client = new CovalentClient("ckey_be6ae76a05f940e1aae6adc7540");
+       const resp = await client.PricingService.getTokenPrices("eth-mainnet","usd", tokenAddress);
+       console.log("resp.data: ", resp.data && !!resp.data.length);
+       if (resp.data.length && resp.data[0].prices && resp.data[0].prices.length) {
+           let price = resp.data[0].prices[0].price;
+           console.log(`Price found. Token ${tokenAddress}, Price Usd: ${price}`);
+           PRICE_MAP[tokenAddress] = {
+               price: price,
+               lastUpdateDate: now
+           }
+           return price;
+       }
+   } catch (e) {
+       console.error("Load price from CovalentApi error", e.toString());
+   }
 
-      const iso8601Now = now.toISOString();
-      const iso8601TenDaysAgo = tenDaysAgo.toISOString();
-
-      const parameters = {
-          baseAddress: baseAddress,
-          tokenAddress: tokenAddress,
-          from: iso8601TenDaysAgo,
-          till: iso8601Now,
-      };
-
-      const bitQueryResponse = await callBitqueryAPI(endpoint, query, parameters);
-
-      console.log(bitQueryResponse.data.ethereum.dexTrades, iso8601Now, iso8601TenDaysAgo);
-      if (bitQueryResponse.data && bitQueryResponse.data.ethereum.dexTrades && bitQueryResponse.data.ethereum.dexTrades.length && parseFloat(bitQueryResponse.data.ethereum.dexTrades[0].averagePriceInUSD) !== 0) {
-          return parseFloat(bitQueryResponse.data.ethereum.dexTrades[0].averagePriceInUSD);
-      } else {
-          throw new Error('BitQuery price invalid');
-      }
-  } catch (error) {
-      console.log("Error", error)
-  //     // If DexGuru fails, try Moralis
-  //     try {
-  //         const moralisResponse = await axiosMoralis.get(`https://deep-index.moralis.io/api/v2.2/erc20/${address}/price`, {
-  //             params: {
-  //                 chain: 'eth',
-  //                 to_block: block,
-  //             },
-  //         });
-
-  //         if (moralisResponse.data && moralisResponse.data.usdPrice !== 0) {
-  //             return moralisResponse.data.usdPrice;
-  //         } else {
-  //             throw new Error('Moralis price invalid');
-  //         }
-  //     } catch (fallbackError) {
-  //         console.error(fallbackError);
-
-      if (baseAddress !== USDC_ADDRESS) {
-          const newPriceByUSDC = getTokenPrice(USDC_ADDRESS, tokenAddress, timestamp, block);
-          return newPriceByUSDC;
-      }
-
-          console.log(`${tokenAddress} price on bitquery is 0`);
-          return 0;
-      // }
-  }
+    return 0;
 }
 
 async function fetchTokenPricesInBatches(tokenAddresses, batchSize = 100) {
@@ -295,14 +255,14 @@ async function assignPricesToTrades(transformedData, allDataResults) {
       if (transaction.direction === "convert") {
         const tokens = [...transaction.tokens_in, ...transaction.tokens_out];
         const pricesUpdated = await Promise.all(
-          tokens.map(token => getTokenPrice(USDT_ADDRESS, token.address, transaction.timestamp, transaction.block))
+          tokens.map(token => getTokenPrice(token.address, transaction.timestamp, transaction.block))
         );
 
         tokens.forEach((token, index) => {
           token.price_usd = pricesUpdated[index];
         });
 
-        if (tokens.some(token => token.price_usd === 0)) {
+        if (tokens.some(token => !token.price_usd)) {
           transaction.direction = "ineligible";
         }
       }
