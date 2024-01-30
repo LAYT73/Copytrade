@@ -1,4 +1,4 @@
-require('dotenv').config(); 
+require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const needle = require('needle');
@@ -40,7 +40,7 @@ function batchAddressesWithParameters(addresses, startDate, endDate, batchSize =
 
 async function documentAddressesCmd(ctx) {
     const inputText = ctx.message?.caption;
-    const command = inputText?.split(' ')[0]; 
+    const command = inputText?.split(' ')[0];
     if (command === '/addresses') {
         try {
             if (ctx.message.document) {
@@ -64,14 +64,14 @@ async function documentAddressesCmd(ctx) {
     }
 }
 async function addressesCmd(ctx) {
-	const messageTimestamp = ctx.message.date * 1000; 
+	const messageTimestamp = ctx.message.date * 1000;
     const currentTimestamp = new Date().getTime();
     const timeDifferenceMinutes = (currentTimestamp - messageTimestamp) / (1000 * 60);
     if (timeDifferenceMinutes >= 1) {
 		ctx.reply("Sorry, this command can only be used for messages received within the last 10 minutes.");
         return
 	}
-    const inputText = ctx.message.text;	
+    const inputText = ctx.message.text;
     try {
         const {
             addressesFull,
@@ -123,8 +123,8 @@ async function addressesCmd(ctx) {
                     }, error.message);
                 }
             }
-        
-                // const fetchDataPromises = batchedAddressObjects.map(batch => 
+
+                // const fetchDataPromises = batchedAddressObjects.map(batch =>
                 //     fetchDataInParallel(transfersByAdresses, batch.parameters, batch.count)
                 //       .then(fetchDataResults => {
                 //         fetchDataResults.forEach(result => {
@@ -141,11 +141,11 @@ async function addressesCmd(ctx) {
                 //       })
                 //   );
                 //   await Promise.all(fetchDataPromises);
-        
+
                 const filePath = path.join(__dirname, 'dataResults.json');
                 // fs.writeFileSync(filePath, JSON.stringify(allDataResults, null, 4));
                 console.log('Data saved to:', filePath);
-        
+
                 const transformedData = transformData(allDataResults);
                 // Process each user's transactions
         Object.entries(transformedData).forEach(([userAddress, transactions]) => {
@@ -164,9 +164,9 @@ async function addressesCmd(ctx) {
             }
             async function analyzeAndSummarizeData(transformedData) {
                 let structuredSummaryData = {};
-            
+
                 for (const [address, trades] of Object.entries(transformedData)) {
-                    const analysis = tradeService.analyzeTrades(trades);
+                    const analysis = await tradeService.analyzeTrades(trades);
                     const reportList = await tradeService.generateReportList(analysis.positionHistory);
                     const summaryData = tradeService.formReportSummary(trades, reportList, address);
                     structuredSummaryData[address] = {
@@ -189,12 +189,12 @@ async function addressesCmd(ctx) {
             ////////////////////////
         }
         console.log(`Finished processing all batches.`);
-    
+
         } catch (error) {
             console.error(error);
             ctx.reply('An error occurred while generating the report. ' + error.message);
         }
-        
+
     }
 
 

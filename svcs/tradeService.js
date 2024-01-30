@@ -2,165 +2,204 @@ const axios = require('axios');
 const BigNumber = require('bignumber.js');
 const {fetchTokenPricesInBatches} = require('../svcs/priceGatheringSvc')
 // Declare your stablecoin addresses and wrapped ether address
+const priceService = require('../services/priceService');
+const {PRICE_CURRENCY_SYMBOL} = require("./priceGatheringSvc");
 
 const wrappedEther = ['0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2'];
 
 
 
-function analyzeTrades(trades) {
-  let positions = [];
-  let totalProfit = 0;
-  let totalCost = 0;
-  let totalVolume = 0;
-  let positionHistory = [];
+async function analyzeTrades(trades) {
+    let positions = [];
+    let totalProfit = 0;
+    let totalCost = 0;
+    let totalVolume = 0;
+    let positionHistory = [];
 
-  const handlePositionEvent = (positionHistory, event, transaction_address, timestamp, token, props) => {
-    positionHistory.push({
-      event: event,
-      transaction_link: `https://etherscan.io/tx/${transaction_address}`,
-      date_time: timestamp,
-      token: token.symbol,
-	  tokenAddress: token.address,
-      ...props
-    });
-  };
+    const handlePositionEvent = (positionHistory, event, transaction_address, timestamp, token, props) => {
+        positionHistory.push({
+            event: event,
+            transaction_link: `https://etherscan.io/tx/${transaction_address}`,
+            date_time: timestamp,
+            token: token.symbol,
+            tokenAddress: token.address,
+            ...props
+        });
+    };
 
-  const openPosition = (positions, trade) => {
-    trade.tokens_out.forEach((token_out) => {
-      const existingPosition = positions.find(pos => pos.address === token_out.address);
-      const baseToken = trade.tokens_in[0];  // We assume there's only one token in `tokens_in`
-        const tradedAmount = new BigNumber(baseToken.amount_in).minus(baseToken.amount_out).toString();
-        const totalCost = new BigNumber(tradedAmount)
-            .times(new BigNumber(baseToken.price_usd))
-            .plus(new BigNumber(trade.gas_fee_usd))
+    async function openPosition(positions, trade) {
+        for (let i = 0; i < trade.tokens_out.length; i++) {
+            let token_out = trade.tokens_out[i];
+            const existingPosition = findPositionByAddress(positions, token_out.address);
+            const baseToken = trade.tokens_in[0];
+            const outTokenByDateUsdPrice = await priceService.getByTokenAndDate(
+                token_out.address,
+                token_out.symbol,
+                PRICE_CURRENCY_SYMBOL,
+                new Date(trade.timestamp * 1000)
+            );
+
+            if (!outTokenByDateUsdPrice) {
+                console.error(`No historical price found for ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+                // throw new Error(`No historical price found for ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+            }
+
+            if (existingPosition) {
+                updateExistingPosition(existingPosition, token_out, outTokenByDateUsdPrice ? outTokenByDateUsdPrice.price : 0, positionHistory, trade);
+            } else {
+                createNewPosition(positions, trade, token_out, outTokenByDateUsdPrice ? outTokenByDateUsdPrice.price : 0, positionHistory);
+            }
+        }
+    }
+
+    function findPositionByAddress(positions, address) {
+        return positions.find(pos => pos.address === address);
+    }
+
+    function updateExistingPosition(existingPosition, token_out, outTokenUsdPrice, positionHistory, trade) {
+        existingPosition.quantity = new BigNumber(existingPosition.quantity)
+            .plus(new BigNumber(token_out.amount_out))
             .toString();
 
-      if (existingPosition) {
-        const newTotalCost = new BigNumber(existingPosition.price_usd)
-                .times(new BigNumber(existingPosition.quantity))
-                .plus(new BigNumber(totalCost))
-                .toString();
-        existingPosition.quantity = new BigNumber(existingPosition.quantity)
-                .plus(new BigNumber(token_out.amount_out))
-                .toString();
-        existingPosition.price_usd = new BigNumber(newTotalCost)
-                .dividedBy(new BigNumber(existingPosition.quantity))
-                .toString();
-
-          // Avoiding division by zero or a very small number
-          const new_delta_price_usd = (new BigNumber(token_out.amount_out).isGreaterThan(0))
-              ? new BigNumber(totalCost).dividedBy(new BigNumber(token_out.amount_out)).toString()
-              : '0';
-
-        // handle position event
         handlePositionEvent(positionHistory, "increase position", trade.transaction_address, trade.timestamp, token_out, {
-          quantity: token_out.amount_out,
-          price_usd: new_delta_price_usd,
-		  gas_fee_usd: trade.gas_fee_usd
+            quantity: token_out.amount_out,
+            price_usd: outTokenUsdPrice.toString(),
+            gas_fee_usd: trade.gas_fee_usd
         });
+    }
 
-      } else {
+    function createNewPosition(positions, trade, token_out, outTokenUsdPrice, positionHistory) {
         const newPosition = {
-          transaction_address: trade.transaction_address,
-          timestamp: trade.timestamp,
-          blockNumber: trade.blockNumber,
-          address: token_out.address,
-          symbol: token_out.symbol,
-          quantity: token_out.amount_out,
-          price_usd: new BigNumber(totalCost).dividedBy(new BigNumber(token_out.amount_out)).toString()
+            transaction_address: trade.transaction_address,
+            timestamp: trade.timestamp,
+            blockNumber: trade.blockNumber,
+            address: token_out.address,
+            symbol: token_out.symbol,
+            quantity: token_out.amount_out,
+            price_usd: outTokenUsdPrice.toString()
         };
 
         positions.push(newPosition);
 
-        // handle position event
         handlePositionEvent(positionHistory, "new position", trade.transaction_address, trade.timestamp, token_out, {
-          quantity: newPosition.quantity,
-          price_usd: newPosition.price_usd,
-		  gas_fee_usd: trade.gas_fee_usd
+            quantity: newPosition.quantity,
+            price_usd: newPosition.price_usd,
+            gas_fee_usd: trade.gas_fee_usd
         });
-      }
-    });
-  };
-
-  const closePosition = (positions, trade) => {
-    const token_in = trade.tokens_in[0];
-    const token_out = trade.tokens_out[0];
-    const existingPosition = positions.find(pos => pos.address === token_in.address);
-
-    if (!existingPosition) {
-        console.warn(`Attempting to close a non-existent position for ${token_in.symbol}. Ignoring this operation.`);
-        return { profit: '0', cost: '0' };
     }
 
-    if (new BigNumber(existingPosition.quantity).isLessThan(new BigNumber(token_in.amount_in))) {
-        console.warn(`Attempting to sell more than available for ${token_in.symbol}. Only selling the available amount.`);
+    async function closePosition (positions, trade) {
+        const token_in = trade.tokens_in[0];
+        const token_out = trade.tokens_out[0];
+        const existingPosition = positions.find(pos => pos.address === token_in.address);
 
-        const adjustmentRatio = new BigNumber(existingPosition.quantity).dividedBy(token_in.amount_in);
+        if (!existingPosition) {
+            console.warn(`Attempting to close a non-existent position for ${token_in.symbol}. Ignoring this operation.`);
+            return {profit: 0, cost: 0};
+        }
 
-        token_in.amount_in = existingPosition.quantity;
-        token_out.amount_out = new BigNumber(token_out.amount_out).times(adjustmentRatio).toString();
+        const historicalTokenInPrice = await priceService.getByTokenAndDate(token_in.address, token_in.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
+        const historicalTokenOutPrice = await priceService.getByTokenAndDate(token_out.address, token_out.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
+
+        if (!historicalTokenInPrice || !historicalTokenOutPrice) {
+            console.error(`No historical price found for ${token_in.symbol} or ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+            // throw new Error(`No historical price found for ${token_in.symbol} or ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+        }
+
+        if (new BigNumber(existingPosition.quantity).isLessThan(new BigNumber(token_in.amount_in))) {
+            console.warn(`Attempting to sell more than available for ${token_in.symbol}. Only selling the available amount.`);
+
+            const adjustmentRatio = new BigNumber(existingPosition.quantity).dividedBy(token_in.amount_in);
+
+            token_in.amount_in = existingPosition.quantity;
+            token_out.amount_out = new BigNumber(token_out.amount_out).times(adjustmentRatio).toString();
+        }
+
+        const cost = new BigNumber(token_in.amount_in)
+            .times(new BigNumber(historicalTokenInPrice ? historicalTokenInPrice.price.toString() : 0))
+            .toString();
+
+        const revenue = new BigNumber(token_out.amount_out)
+            .times(new BigNumber(historicalTokenOutPrice ? historicalTokenOutPrice.price.toString() : 0))
+            .minus(new BigNumber(trade.gas_fee_usd))
+            .toString();
+
+        const profit = new BigNumber(revenue)
+            .minus(new BigNumber(cost))
+            .toString();
+
+        existingPosition.quantity = new BigNumber(existingPosition.quantity)
+            .minus(new BigNumber(token_in.amount_in))
+            .toString();
+
+        // Avoiding division by zero or a very small number
+        let price_usd = (new BigNumber(token_in.amount_in).isGreaterThan(0))
+            ? new BigNumber(revenue).dividedBy(new BigNumber(token_in.amount_in)).toString()
+            : '0';
+
+        handlePositionEvent(positionHistory, "sell", trade.transaction_address, trade.timestamp, token_in, {
+            quantity: token_in.amount_in,
+            price_usd: historicalTokenInPrice ? historicalTokenInPrice.price.toString() : 0,
+            gas_fee_usd: trade.gas_fee_usd,
+            profit: profit
+        });
+
+        return {profit: Number(profit), cost: Number(cost)};
+    };
+
+
+    async function handleTrade(trade) {
+        if (trade.direction === 'buy') {
+            if (trade.tokens_out.length) {
+                await openPosition(positions, trade);
+            }
+
+            return {
+                profit: 0,
+                cost: 0
+            }
+        }
+
+        if (trade.direction === 'sell') {
+            const results = await closePosition(positions, trade);
+            return {
+                profit: results.profit,
+                cost: results.cost
+            };
+        }
+
+        if (trade.direction === 'convert') {
+            if (trade.tokens_out.length) {
+                await openPosition(positions, trade);
+            }
+
+            if (trade.tokens_in.length) {
+                const results = await closePosition(positions, trade);
+                return {
+                    profit: results.profit,
+                    cost: results.cost
+                };
+            }
+        }
+
+        return {
+            profit: 0,
+            cost: 0
+        }
     }
 
-    const cost = new BigNumber(token_in.amount_in)
-        .times(new BigNumber(existingPosition.price_usd))
-        .toString();
 
-    const revenue = new BigNumber(token_out.amount_out)
-        .times(new BigNumber(token_out.price_usd))
-        .minus(new BigNumber(trade.gas_fee_usd))
-        .toString();
-
-    const profit = new BigNumber(revenue)
-        .minus(new BigNumber(cost))
-        .toString();
-
-    existingPosition.quantity = new BigNumber(existingPosition.quantity)
-        .minus(new BigNumber(token_in.amount_in))
-        .toString();
-
-    // Avoiding division by zero or a very small number
-    const price_usd = (new BigNumber(token_in.amount_in).isGreaterThan(0))
-        ? new BigNumber(revenue).dividedBy(new BigNumber(token_in.amount_in)).toString()
-        : '0';
-
-    handlePositionEvent(positionHistory, "sell", trade.transaction_address, trade.timestamp, token_in, {
-        quantity: token_in.amount_in,
-        price_usd: price_usd,
-        gas_fee_usd: trade.gas_fee_usd,
-        profit: profit
-    });
-
-    return { profit: profit, cost: cost };
-};
-
-
-
-  trades.forEach((trade) => {
-    if (trade.direction === 'buy') {
-      trade.tokens_out.forEach(() => {
-        openPosition(positions, trade);
-      });
-    } else if (trade.direction === 'sell') {
-      const results = closePosition(positions, trade);
-      totalProfit += results.profit;
-	  totalCost += results.cost;
-    } else if (trade.direction === 'convert') {
-      trade.tokens_out.forEach(() => {
-        openPosition(positions, trade);
-      });
-      trade.tokens_in.forEach(() => {
-        const results = closePosition(positions, trade);
-        totalProfit += results.profit;
-		totalCost += results.cost;
-      });
+    for (let i = 0; i < trades.length; i++) {
+        let tradeDate = await handleTrade(trades[i]);
+        totalProfit += tradeDate.profit;
+        totalCost += tradeDate.cost;
     }
-  });
 
-  return {
-    totalProfit,
-    positions,
-    positionHistory
-  };
+    return {
+        totalProfit,
+        positions,
+        positionHistory
+    };
 }
 
 async function generateReportList(positionHistory) {
