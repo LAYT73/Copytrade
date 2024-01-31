@@ -9,6 +9,7 @@ const {log} = require('console');
 const tokenService = require('../services/tokenService');
 const priceService = require('../services/priceService');
 const covalentService = require('../services/covalentService');
+const bitqueryService = require('../services/bitqueryService');
 const moment = require("moment");
 
 const PRICE_UPDATE_HOURS = 24; // 24 hours
@@ -16,18 +17,6 @@ const PRICE_TO_UPDATE_LAST_DAYS = 180; // 180 days - 6 months
 const PRICE_CURRENCY_SYMBOL = 'USD';
 const TOKEN_CHAIN = 'eth-mainnet';
 
-async function callBitqueryAPI(endpoint, query, parameters) {
-    try {
-        const response = await axiosBitquery.post(endpoint, {
-            query,
-            variables: parameters
-        });
-        return response.data;
-    } catch (error) {
-        console.error('Error in callBitqueryAPI:', error);
-        throw error;
-    }
-}
 
 async function updateKlineCSV(startTime, endTime) {
     startTime = startTime.toString().length === 10 ? startTime * 1000 : startTime;
@@ -192,10 +181,33 @@ async function updatePriceIsNeeded(token) {
 
 async function updateHistoricalTokenPrices(token, startDate, endDate) {
     await covalentService.getPrices(token.address, PRICE_CURRENCY_SYMBOL, startDate, endDate).then(async prices => {
-        await updateTokenPrices(token, prices);
+        if (isExistPricesData(prices)) {
+            await updateTokenPrices(token, prices);
+        } else {
+            let price = await bitqueryService.getTokenPrices(token.address, moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days'), new Date());
+            await updateTokenFixedPrices(token, price);
+        }
     }).catch(error => {
         console.error("Error: ", error);
     });
+}
+
+function isExistPricesData(prices) {
+    return prices && prices.length && prices[0].price !== null && prices[0].price !== undefined && prices[0].price !== 0;
+}
+
+// todo 3 remove hardcode
+async function updateTokenFixedPrices(token, price) {
+    let prices = [];
+    // price its same price with different dates, count of dates = PRICE_TO_UPDATE_LAST_DAYS every daye
+    for (let i = 0; i < PRICE_TO_UPDATE_LAST_DAYS; i++) {
+        prices.push({
+            date: moment(new Date()).subtract(i, 'days').toDate(),
+            price: price
+        });
+    }
+
+    await updateTokenPrices(token, prices);
 }
 
 async function updateTokenPrices(token, prices) {
@@ -209,7 +221,7 @@ async function updateTokenPrices(token, prices) {
             continue;
         }
 
-        await priceService.add(['token_address', 'base_symbol', 'quota_symbol', 'date', 'price'], [token.address, token.symbol, PRICE_CURRENCY_SYMBOL, date, price.price ? price.price : 0]);
+        await priceService.add(['token_address', 'base_symbol', 'quota_symbol', 'date', 'price'], [token.address, token.symbol, PRICE_CURRENCY_SYMBOL, date, price.price]);
         await tokenService.update(token.id, ['last_price_update_date'], [new Date()]);
         console.log(`Price Updated! Token ${token.symbol}, Price Usd: ${price.price} Date: ${moment(date).format('YYYY-MM-DD')}`)
     }
@@ -277,21 +289,28 @@ async function fetchTokenPricesInBatches(tokenAddresses, batchSize = 100) {
 
 async function initIsNotExistingToken(tokenAddress) {
     let token = await tokenService.getByAddressAndChain(tokenAddress, TOKEN_CHAIN);
-    if (!token) {
-        let startDate = moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days').toDate();
-        let tokenInfo = await covalentService.getTokenWithPrices(tokenAddress, PRICE_CURRENCY_SYMBOL, startDate);
-        if (!tokenInfo) {
-            console.error(`Token ${tokenAddress} not found in covalent or database`);
-            return false;
-        }
-
-        token = await tokenService.add(
-            ['address', 'symbol', 'chain', 'decimals'],
-            [tokenInfo.contract_address, tokenInfo.contract_ticker_symbol, TOKEN_CHAIN, tokenInfo.contract_decimals]
-        );
-        await updateTokenPrices(token, tokenInfo.prices);
+    if (token) {
+        return true;
     }
-    return true;
+
+    let startDate = moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days').toDate();
+    let tokenInfo = await covalentService.getTokenWithPrices(tokenAddress, PRICE_CURRENCY_SYMBOL, startDate);
+    if (!tokenInfo) {
+        console.error(`Token ${tokenAddress} not found in covalent or database`);
+        return false;
+    }
+
+    token = await tokenService.add(
+        ['address', 'symbol', 'chain', 'decimals'],
+        [tokenInfo.contract_address, tokenInfo.contract_ticker_symbol, TOKEN_CHAIN, tokenInfo.contract_decimals]
+    );
+
+    if (!isExistPricesData(tokenInfo.prices)) {
+        let price = await bitqueryService.getTokenPrices(tokenAddress, moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days'), new Date());
+        await updateTokenFixedPrices(token, price);
+        return true;
+    }
+    await updateTokenPrices(token, tokenInfo.prices);
 }
 
 async function assignPricesToTrades(transformedData, allDataResults) {
