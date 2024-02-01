@@ -29,25 +29,30 @@ async function analyzeTrades(trades) {
 
     async function openPosition(positions, trade) {
         for (let i = 0; i < trade.tokens_out.length; i++) {
-            let token_out = trade.tokens_out[i];
-            const existingPosition = findPositionByAddress(positions, token_out.address);
-            const baseToken = trade.tokens_in[0];
-            const outTokenByDateUsdPrice = await priceService.getByTokenAndDate(
-                token_out.address,
-                token_out.symbol,
-                PRICE_CURRENCY_SYMBOL,
-                new Date(trade.timestamp * 1000)
-            );
+            let tokenOut = trade.tokens_out[i];
+            const existingPosition = findPositionByAddress(positions, tokenOut.address);
+            const tokenIn = trade.tokens_in[0];
 
-            if (!outTokenByDateUsdPrice) {
-                console.error(`No historical price found for ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
-                // throw new Error(`No historical price found for ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+            // todo 5 remove after debug
+            if (tokenOut.symbol === 'CRE' || tokenIn.symbol === 'CRE') {
+                console.log('CRE')
             }
 
+            let {tokenInPrice: historicalTokenInPrice, tokenOutPrice: historicalTokenOutPrice} = await getActualPriceByDate(tokenIn, tokenOut, new Date(trade.timestamp * 1000));
+            // const historicalTokenOutPrice = await priceService.getByTokenAndDate(
+            //     tokenOut.address,
+            //     tokenOut.symbol,
+            //     PRICE_CURRENCY_SYMBOL,
+            //     new Date(trade.timestamp * 1000)
+            // );
+            if (!historicalTokenOutPrice) {
+                console.error(`No historical price found for ${tokenOut.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+                // throw new Error(`No historical price found for ${tokenOut.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+            }
             if (existingPosition) {
-                updateExistingPosition(existingPosition, token_out, outTokenByDateUsdPrice ? outTokenByDateUsdPrice.price : 0, positionHistory, trade);
+                updateExistingPosition(existingPosition, tokenOut, historicalTokenOutPrice ? historicalTokenOutPrice.price : 0, positionHistory, trade);
             } else {
-                createNewPosition(positions, trade, token_out, outTokenByDateUsdPrice ? outTokenByDateUsdPrice.price : 0, positionHistory);
+                createNewPosition(positions, trade, tokenOut, historicalTokenOutPrice ? historicalTokenOutPrice.price : 0, positionHistory);
             }
         }
     }
@@ -88,6 +93,31 @@ async function analyzeTrades(trades) {
         });
     }
 
+    async function getActualPriceByDate(tokenIn, tokenOut, date) {
+        let tokenInPrice = null;
+        let tokenOutPrice = null;
+
+        if (tokenIn.symbol === 'ETH' || tokenIn.symbol === 'WETH') {
+            tokenInPrice = await priceService.getByTokenAndDate(tokenIn.address, tokenIn.symbol, PRICE_CURRENCY_SYMBOL, date);
+
+            let oneTokenPerEthPrice = new BigNumber(tokenIn.amount).div(tokenOut.amount).toString();
+            tokenOutPrice = await priceService.getByTokenAndDateAndEth(tokenOut.address, tokenOut.symbol, PRICE_CURRENCY_SYMBOL, oneTokenPerEthPrice, date);
+        } else if (tokenOut.symbol === 'ETH' || tokenOut.symbol === 'WETH') {
+            tokenOutPrice = await priceService.getByTokenAndDate(tokenOut.address, tokenOut.symbol, PRICE_CURRENCY_SYMBOL, date);
+
+            let oneTokenPerEthPrice = new BigNumber(tokenOut.amount).div(tokenIn.amount).toString();
+            tokenInPrice = await priceService.getByTokenAndDateAndEth(tokenIn.address, tokenIn.symbol, PRICE_CURRENCY_SYMBOL, oneTokenPerEthPrice, date);
+        } else {
+            tokenInPrice = await priceService.getByTokenAndDate(tokenIn.address, tokenIn.symbol, PRICE_CURRENCY_SYMBOL, date);
+            tokenOutPrice = await priceService.getByTokenAndDate(tokenOut.address, tokenOut.symbol, PRICE_CURRENCY_SYMBOL, date);
+        }
+
+        return {
+            tokenInPrice,
+            tokenOutPrice
+        }
+    }
+
     async function closePosition (positions, trade) {
         const token_in = trade.tokens_in[0];
         const token_out = trade.tokens_out[0];
@@ -98,12 +128,22 @@ async function analyzeTrades(trades) {
             return {profit: 0, cost: 0};
         }
 
-        const historicalTokenInPrice = await priceService.getByTokenAndDate(token_in.address, token_in.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
-        const historicalTokenOutPrice = await priceService.getByTokenAndDate(token_out.address, token_out.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
+        let {
+            tokenInPrice: historicalTokenInPrice,
+            tokenOutPrice: historicalTokenOutPrice
+        } = await getActualPriceByDate(token_in, token_out, new Date(trade.timestamp * 1000));
+
+        // const historicalTokenInPrice = await priceService.getByTokenAndDate(token_in.address, token_in.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
+        // const historicalTokenOutPrice = await priceService.getByTokenAndDate(token_out.address, token_out.symbol, PRICE_CURRENCY_SYMBOL, new Date(trade.timestamp * 1000));
 
         if (!historicalTokenInPrice || !historicalTokenOutPrice) {
             console.error(`No historical price found for ${token_in.symbol} or ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
             // throw new Error(`No historical price found for ${token_in.symbol} or ${token_out.symbol} on ${new Date(trade.timestamp * 1000)}. Using current price.`);
+        }
+
+        // todo 5 remove after debug
+        if (token_in.symbol === 'CRE' || token_out.symbol === 'CRE') {
+            console.log('CRE')
         }
 
         if (new BigNumber(existingPosition.quantity).isLessThan(new BigNumber(token_in.amount_in))) {
@@ -119,7 +159,7 @@ async function analyzeTrades(trades) {
             .times(new BigNumber(historicalTokenInPrice ? historicalTokenInPrice.price.toString() : 0))
             .toString();
 
-        const revenue = new BigNumber(token_out.amount_out)
+        let revenue = new BigNumber(token_out.amount_out)
             .times(new BigNumber(historicalTokenOutPrice ? historicalTokenOutPrice.price.toString() : 0))
             .minus(new BigNumber(trade.gas_fee_usd))
             .toString();
@@ -231,7 +271,8 @@ async function generateReportList(positionHistory) {
             address: tokenAddress,
             totalBought: new BigNumber(0),
             totalSold: new BigNumber(0),
-            avgAcqPrice: new BigNumber(0),
+            avgAcqBuyPrice: new BigNumber(0),
+            avgAcqSellPrice: new BigNumber(0),
             boughtSumUsd: new BigNumber(0),
             soldSumUsd: new BigNumber(0),
             totalFees: new BigNumber(0),
@@ -256,6 +297,11 @@ async function generateReportList(positionHistory) {
             const quantityBN = new BigNumber(position.quantity);
             const priceUsdBN = new BigNumber(position.price_usd);
 
+            // todo 5 remove after debug
+            if (position.token === 'CRE' || position.token === 'CRE') {
+                console.log('CRE')
+            }
+
             if (position.event === "new position" || position.event === "increase position") {
                 reportItem.totalBought = reportItem.totalBought.plus(quantityBN);
                 reportItem.boughtSumUsd = reportItem.boughtSumUsd.plus(quantityBN.times(priceUsdBN));
@@ -273,14 +319,16 @@ async function generateReportList(positionHistory) {
             }
         });
 
-        reportItem.avgAcqPrice = reportItem.boughtSumUsd.dividedBy(reportItem.totalBought);
-        reportItem.PNL_R_boughtSumUsd = reportItem.totalSold.times(reportItem.avgAcqPrice);
-        reportItem.PNL_UR_boughtSumUsd = reportItem.totalBought.minus(reportItem.totalSold).times(reportItem.avgAcqPrice);
+        reportItem.avgAcqBuyPrice = reportItem.boughtSumUsd.dividedBy(reportItem.totalBought);
+        reportItem.avgAcqSellPrice = reportItem.soldSumUsd.dividedBy(reportItem.totalSold);
 
+        reportItem.PNL_R_boughtSumUsd = reportItem.totalSold.times(reportItem.avgAcqSellPrice);
+        reportItem.PNL_UR_boughtSumUsd = reportItem.totalBought.minus(reportItem.totalSold).times(reportItem.avgAcqSellPrice);
         reportItem.delta = reportItem.totalBought.minus(reportItem.totalSold);
+        reportItem.deltaUsd = reportItem.delta.times(reportItem.avgAcqSellPrice);
         // reportItem.deltaUsd = reportItem.delta.times(prices[tokenAddress] || 0);
         // debugger;
-        const usdLiquidity = new BigNumber(liquidities[tokenAddress] || 1);
+      /*  const usdLiquidity = new BigNumber(liquidities[tokenAddress] || 1);
         const tokenPrice = new BigNumber(prices[tokenAddress] || 0.0000000001);
         const tokenLiquidity = usdLiquidity.div(tokenPrice);
         const amountIn = new BigNumber(reportItem.delta);
@@ -297,10 +345,7 @@ async function generateReportList(positionHistory) {
             } catch (error) {
                 reportItem.deltaUsd = new BigNumber(0);
             }
-        }
-
-
-
+        }*/
 
         reportItem.deltaPNLUsd = reportItem.deltaUsd.plus(reportItem.soldSumUsd).minus(reportItem.boughtSumUsd);
         reportItem.deltaPNLPercentage = reportItem.boughtSumUsd.isEqualTo(0) ? new BigNumber(0) : reportItem.deltaPNLUsd.dividedBy(reportItem.boughtSumUsd).times(100);
@@ -433,15 +478,15 @@ const summaryData = {
     buys: totalBuys.toNumber(),
     sells: totalSells.toNumber(),
     converts: totalConverts.toNumber(),
-    totalFees: parseFloat(totalFeesUSD.toFixed(2)),
-    PnL_R: parseFloat(totalRealizedUSD.toFixed(2)),
-    PnL_R_Percentage: parseFloat(totalRealizedUSD.dividedBy(PNL_R_boughtSumUsd).multipliedBy(100).toFixed(2)),
+    totalFees: parseFloat(totalFeesUSD.toFixed(10)),
+    PnL_R: parseFloat(totalRealizedUSD.toFixed(10)),
+    PnL_R_Percentage: parseFloat(totalRealizedUSD.dividedBy(PNL_R_boughtSumUsd).multipliedBy(100).toFixed(10)),
     averageRealizedPercentage: parseFloat(averageRealizedPNLPercentage),
-    PnL_U: parseFloat(totalUnrealizedUSD.toFixed(2)),
-    PnL_U_Percentage: parseFloat(totalUnrealizedUSD.dividedBy(PNL_UR_boughtSumUsd).multipliedBy(100).toFixed(2)),
+    PnL_U: parseFloat(totalUnrealizedUSD.toFixed(10)),
+    PnL_U_Percentage: parseFloat(totalUnrealizedUSD.dividedBy(PNL_UR_boughtSumUsd).multipliedBy(100).toFixed(10)),
     averageUnrealizedPercentage: parseFloat(averageUnrealizedPNLPercentage),
-    winrateRealizedPercentage: parseFloat((profitableRealizedTrades / (profitableRealizedTrades + unprofitableRealizedTrades) * 100).toFixed(2)),
-    winrateUnrealizedPercentage: parseFloat((profitableUnrealizedTrades / (profitableUnrealizedTrades + unprofitableUnrealizedTrades) * 100).toFixed(2)),
+    winrateRealizedPercentage: parseFloat((profitableRealizedTrades / (profitableRealizedTrades + unprofitableRealizedTrades) * 100).toFixed(10)),
+    winrateUnrealizedPercentage: parseFloat((profitableUnrealizedTrades / (profitableUnrealizedTrades + unprofitableUnrealizedTrades) * 100).toFixed(10)),
     numRealizedTrades: profitableRealizedTrades + unprofitableRealizedTrades,
     numUnrealizedTrades: profitableUnrealizedTrades + unprofitableUnrealizedTrades
 };

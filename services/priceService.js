@@ -1,4 +1,6 @@
 const db = require('../repository/databaseRepository');
+const {getTokenPrices} = require("./bitqueryService");
+const BigNumber = require("bignumber.js");
 
 const TABLE_NAME = 'prices';
 
@@ -8,6 +10,35 @@ async function getAll() {
 
 async function getOne(id) {
     return db.getOne(TABLE_NAME, id);
+}
+
+async function getByTokenAndDateAndEth(tokenAddress, baseSymbol, quotaSymbol, oneTokenPerEthPrice, date) {
+    let ethPrice = await getByTokenAndDate('0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2', 'ETH', quotaSymbol, date);
+    if (!ethPrice) {
+        return null;
+    }
+
+    //  ethPrice * oneTokenPerEthPrice
+    const priceByEth = new BigNumber(ethPrice.price).multipliedBy(oneTokenPerEthPrice).toString();
+    let tokenPriceObject = await getByTokenAndDate(tokenAddress, baseSymbol, quotaSymbol, date);
+    if (!tokenPriceObject) {
+        if (!priceByEth) {
+            return null;
+        }
+
+        // todo 3 remove hardcode
+        return {
+            id: -1,
+            token_address: tokenAddress,
+            base_symbol: baseSymbol,
+            quota_symbol: quotaSymbol,
+            date: date,
+            price: priceByEth
+        }
+    }
+
+    tokenPriceObject.price = priceByEth;
+    return tokenPriceObject;
 }
 
 async function getByTokenAndDate(tokenAddress, baseSymbol, quotaSymbol, date) {
@@ -53,6 +84,7 @@ module.exports = {
     getAll,
     getOne,
     getByTokenAndDate,
+    getByTokenAndDateAndEth,
     add,
     update,
     remove
