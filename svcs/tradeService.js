@@ -112,6 +112,14 @@ async function analyzeTrades(trades) {
             tokenOutPrice = await priceService.getByTokenAndDate(tokenOut.address, tokenOut.symbol, PRICE_CURRENCY_SYMBOL, date);
         }
 
+        if (!tokenInPrice) {
+            tokenInPrice = await priceService.getByTokenFirstByDate(tokenIn.address, tokenIn.symbol, PRICE_CURRENCY_SYMBOL);
+        }
+
+        if (!tokenOutPrice) {
+            tokenOutPrice = await priceService.getByTokenFirstByDate(tokenOut.address, tokenOut.symbol, PRICE_CURRENCY_SYMBOL);
+        }
+
         return {
             tokenInPrice,
             tokenOutPrice
@@ -306,6 +314,7 @@ async function generateReportList(positionHistory) {
                 reportItem.totalBought = reportItem.totalBought.plus(quantityBN);
                 reportItem.boughtSumUsd = reportItem.boughtSumUsd.plus(quantityBN.times(priceUsdBN));
                 reportItem.numberOfBuys += 1;
+                reportItem.totalFees = reportItem.totalFees.plus(new BigNumber(position.gas_fee_usd));
             } else if (position.event === "sell") {
                 reportItem.totalSold = reportItem.totalSold.plus(quantityBN);
                 reportItem.soldSumUsd = reportItem.soldSumUsd.plus(quantityBN.times(priceUsdBN));
@@ -325,7 +334,13 @@ async function generateReportList(positionHistory) {
         reportItem.PNL_R_boughtSumUsd = reportItem.totalSold.times(reportItem.avgAcqSellPrice);
         reportItem.PNL_UR_boughtSumUsd = reportItem.totalBought.minus(reportItem.totalSold).times(reportItem.avgAcqSellPrice);
         reportItem.delta = reportItem.totalBought.minus(reportItem.totalSold);
-        reportItem.deltaUsd = reportItem.delta.times(reportItem.avgAcqSellPrice);
+
+        let lastTokenPriceObject =  await priceService.getByTokenLastPrice(tokenAddress, tokenInfo.token, PRICE_CURRENCY_SYMBOL);
+        let lastTokenPrice= lastTokenPriceObject ? lastTokenPriceObject.price : 0;
+        if (!lastTokenPrice) {
+            lastTokenPrice = new BigNumber(prices[tokenAddress] || 0);
+        }
+        reportItem.deltaUsd = reportItem.delta.times(lastTokenPrice);
         // reportItem.deltaUsd = reportItem.delta.times(prices[tokenAddress] || 0);
         // debugger;
       /*  const usdLiquidity = new BigNumber(liquidities[tokenAddress] || 1);

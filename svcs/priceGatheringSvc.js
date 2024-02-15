@@ -147,6 +147,9 @@ async function updateTokensPrices() {
         let isUpdated = await updatePriceIsNeeded(token);
         if (isUpdated) {
             updatedTokens.push(token);
+            console.log("Token updated: ", token.symbol, '. ', updatedTokens.length, ' of ', tokens.length);
+        } else {
+            console.log("Token not updated: ", token.symbol, '. ', updatedTokens.length, ' of ', tokens.length);
         }
     }
 
@@ -221,7 +224,10 @@ async function updateTokenPrices(token, prices) {
             continue;
         }
 
-        await priceService.add(['token_address', 'base_symbol', 'quota_symbol', 'date', 'price'], [token.address, token.symbol, PRICE_CURRENCY_SYMBOL, date, price.price]);
+        await priceService.add(
+            ['token_address', 'base_symbol', 'quota_symbol', 'date', 'price'],
+            [token.address, token.symbol, PRICE_CURRENCY_SYMBOL, date, price.price]
+        );
         await tokenService.update(token.id, ['last_price_update_date'], [new Date()]);
         console.log(`Price Updated! Token ${token.symbol}, Price Usd: ${price.price} Date: ${moment(date).format('YYYY-MM-DD')}`)
     }
@@ -259,7 +265,7 @@ async function fetchTokenPricesInBatches(tokenAddresses, batchSize = 100) {
     const addressBatches = chunkArray(tokenAddresses, batchSize);
 
     const fetchPromises = addressBatches.map(batch => {
-        const url = `https://api.dev.dex.guru/v1/chain/1/tokens/market?token_addresses=${batch.join('%2C')}&order=asc&limit=100&offset=0`;
+        const url = `https://api.dev.dex.guru/v1/chain/1/tokens/market?token_addresses=${batch.join('%2C')}&order=asc&limit=${batchSize}&offset=0`;
         return axiosDexguru.get(url);
     });
 
@@ -300,17 +306,27 @@ async function initIsNotExistingToken(tokenAddress) {
         return false;
     }
 
-    token = await tokenService.add(
-        ['address', 'symbol', 'chain', 'decimals'],
-        [tokenInfo.contract_address, tokenInfo.contract_ticker_symbol, TOKEN_CHAIN, tokenInfo.contract_decimals]
-    );
+    try {
+        if (!tokenInfo.contract_ticker_symbol) {
+            tokenInfo.contract_ticker_symbol = 'N/A';
+        }
 
-    if (!isExistPricesData(tokenInfo.prices)) {
-        let price = await bitqueryService.getTokenPrices(tokenAddress, moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days'), new Date());
-        await updateTokenFixedPrices(token, price);
+        token = await tokenService.add(
+            ['address', 'symbol', 'chain', 'decimals'],
+            [tokenInfo.contract_address, tokenInfo.contract_ticker_symbol, TOKEN_CHAIN, tokenInfo.contract_decimals]
+        );
+
+        if (!isExistPricesData(tokenInfo.prices)) {
+            let price = await bitqueryService.getTokenPrices(tokenAddress, moment(new Date()).subtract(PRICE_TO_UPDATE_LAST_DAYS, 'days'), new Date());
+            await updateTokenFixedPrices(token, price);
+            return true;
+        }
+        await updateTokenPrices(token, tokenInfo.prices);
         return true;
+    } catch (e) {
+        console.error("Token init error. Token: ", tokenInfo, ' Error:', e.toString());
+        return false;
     }
-    await updateTokenPrices(token, tokenInfo.prices);
 }
 
 async function assignPricesToTrades(transformedData, allDataResults) {

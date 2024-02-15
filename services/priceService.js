@@ -53,6 +53,29 @@ async function getByTokenAndDate(tokenAddress, baseSymbol, quotaSymbol, date) {
     return tokenData && tokenData.length > 0 ? tokenData[0] : null
 }
 
+async function getByTokenFirstByDate(tokenAddress, baseSymbol, quotaSymbol) {
+    // todo 3 remove hardcode
+    if (tokenAddress === '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' && baseSymbol === 'ETH') {
+        baseSymbol = 'WETH';
+    }
+    // end hardcode
+
+    let tokenData = await db._allAsync(`SELECT * FROM ${TABLE_NAME} WHERE token_address = '${tokenAddress}' AND base_symbol = '${baseSymbol}' AND quota_symbol = '${quotaSymbol}' ORDER BY date ASC LIMIT 1`)
+    return tokenData && tokenData.length > 0 ? tokenData[0] : null
+}
+
+async function getByTokenLastPrice(tokenAddress, baseSymbol, quotaSymbol) {
+    // todo 3 remove hardcode
+    if (tokenAddress === '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2' && baseSymbol === 'ETH') {
+        baseSymbol = 'WETH';
+    }
+    // end hardcode
+
+    let tokenData = await db._allAsync(`SELECT * FROM ${TABLE_NAME} WHERE token_address = '${tokenAddress}' AND base_symbol = '${baseSymbol}' AND quota_symbol = '${quotaSymbol}' ORDER BY date DESC LIMIT 1`)
+    return tokenData && tokenData.length > 0 ? tokenData[0] : null
+
+}
+
 async function add(fields, values) {
     let dateId = fields.indexOf('date');
     if (dateId >= 0) {
@@ -85,6 +108,8 @@ module.exports = {
     getOne,
     getByTokenAndDate,
     getByTokenAndDateAndEth,
+    getByTokenFirstByDate,
+    getByTokenLastPrice,
     add,
     update,
     remove

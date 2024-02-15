@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const needle = require('needle');
 const { prefetchDataLengthFromBitQuery, fetchDataInParallel } = require('../svcs/bitQuerySvc');
-const { transfersByAdressesCount, transfersByAdresses} = require('../utils/queries');
+const { transfersByAdressesCount, transfersByAdresses, txByHash} = require('../utils/queries');
 const { parseAndValidateInput } = require('../utils/inputParserUtils'); // Example name for input parsing utility
 const tradeService = require('../svcs/tradeService');
 const excelService = require('../svcs/excelService');
@@ -111,8 +111,39 @@ async function addressesCmd(ctx) {
             for (let batch of batchedAddressObjects) {
                 try {
                     const fetchDataResults = await fetchDataInParallel(transfersByAdresses, batch.parameters, batch.count);
+
+                    // {"network":"ethereum","hashes":["0x46f5b62d17a4437571df6a2cf483a31913c00ffeefee758d7f080d4a4b394bc6"]}
+                    const txDataParam = {
+                        network: "ethereum",
+                        limit: batch.parameters.limit,
+                        offset: batch.parameters.offset,
+                        hashes: fetchDataResults.map(result => result
+                            .data
+                            .ethereum
+                            .transfers
+                            .map(transfer => transfer.transaction.hash))
+                            .flat()
+                    }
+                    const fetchTxDataResults = await fetchDataInParallel(txByHash, txDataParam, batch.count);
+                    let transactions = null
+                    if (fetchTxDataResults && fetchTxDataResults.length > 0 && fetchTxDataResults[0].data && fetchTxDataResults[0].data.ethereum && fetchTxDataResults[0].data.ethereum.transactions) {
+                        transactions = fetchTxDataResults[0].data.ethereum.transactions;
+                    }
+
                     for (const result of fetchDataResults) {
                         if (result.data && result.data.ethereum && result.data.ethereum.transfers) {
+
+                            if (transactions && transactions.length > 0) {
+                                for (const transfer of result.data.ethereum.transfers) {
+                                    const txData = transactions.find(tx => tx.hash === transfer.transaction.hash);
+                                    if (txData) {
+                                        transfer.gasValue = txData.gasValue;
+                                        transfer.gasCostUSD = txData.gasCostUSD;
+                                    }
+                                }
+                            }
+
+
                             allDataResults.push(...result.data.ethereum.transfers);
                         }
                     }

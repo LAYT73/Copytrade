@@ -29,6 +29,8 @@ function expandSciNotation(str) {
 
 
 function roundNicely(s) {
+    if (s === null || s === undefined) return s;
+
     if (["null", "NaN", "infinity", "Infinity"].includes(s.toLowerCase())) {
         return s;  // Keep these values as strings.
     }
@@ -92,13 +94,13 @@ reportListWorksheet.columns = [
   { header: "Total Sold", key: "totalSold", width: 15 },
   { header: "Total Fees", key: "totalFees", width: 15 },
   { header: "Delta", key: "delta", width: 15 },
-  { header: "Delta USD", key: "deltaUsd", width: 15 },
+  { header: "Delta USD (current price)", key: "deltaUsd", width: 15 },
   { header: "Bought Sum USD", key: "boughtSumUsd", width: 15 },
   { header: "Sold Sum USD", key: "soldSumUsd", width: 15 },
-  { header: "Delta PNL USD", key: "deltaPnlUsd", width: 15 },
-  { header: "Delta PNL Percentage", key: "deltaPnlPercentage", width: 20 },
-  { header: "Number of Buys", key: "numBuys", width: 15 },
-  { header: "Number of Sells", key: "numSells", width: 15 },
+  { header: "Delta PNL USD (current price)", key: "deltaPNLUsd", width: 15 },
+  { header: "Delta PNL Percentage", key: "deltaPNLPercentage", width: 20 },
+  { header: "Number of Buys", key: "numberOfBuys", width: 15 },
+  { header: "Number of Sells", key: "numberOfSells", width: 15 },
   { header: "Last Tx Date", key: "lastTxDate", width: 20 },
   { header: "Liquidity USD", key: "liquidityUsd", width: 15 },
   { header: "Day Volume USD", key: "dayVolumeUsd", width: 15 }
@@ -158,20 +160,20 @@ reportList.forEach((entry) => {
         wallet: wallet,
         symbol: entry.symbol,
         address: entry.address,
-        totalBought: roundNicely(entry.totalBought.toString()),
-        totalSold: roundNicely(entry.totalSold.toString()),
-        totalFees: roundNicely(entry.totalFees.toString()),
-        delta: roundNicely(entry.delta.toString()),
-        deltaUsd: roundNicely(entry.deltaUsd.toString()),
-        boughtSumUsd: roundNicely(entry.boughtSumUsd.toString()),
-        soldSumUsd: roundNicely(entry.soldSumUsd.toString()),
-        deltaPNLUsd: roundNicely(entry.deltaPNLUsd.toString()),
-        deltaPNLPercentage: roundNicely(entry.deltaPNLPercentage.toString()),
-        numberOfBuys: roundNicely(entry.numberOfBuys.toString()),
-        numberOfSells: roundNicely(entry.numberOfSells.toString()),
+        totalBought: roundNicely(entry.totalBought ? entry.totalBought.toString() : null),
+        totalSold: roundNicely(entry.totalSold ? entry.totalSold.toString() : null),
+        totalFees: roundNicely(entry.totalFees ? entry.totalFees.toString() : null),
+        delta: roundNicely(entry.delta ? entry.delta.toString() : null),
+        deltaUsd: roundNicely(entry.deltaUsd ? entry.deltaUsd.toString() : null),
+        boughtSumUsd: roundNicely(entry.boughtSumUsd ? entry.boughtSumUsd.toString() : null),
+        soldSumUsd: roundNicely(entry.soldSumUsd ? entry.soldSumUsd.toString() : null),
+        deltaPNLUsd: roundNicely(entry.deltaPNLUsd ? entry.deltaPNLUsd.toString() : null),
+        deltaPNLPercentage: roundNicely(entry.deltaPNLPercentage ? entry.deltaPNLPercentage.toString() : null),
+        numberOfBuys: roundNicely(entry.numberOfBuys ? entry.numberOfBuys.toString() : null),
+        numberOfSells: roundNicely(entry.numberOfSells ? entry.numberOfSells.toString() : null),
         lastTxDate: entry.lastTxDate,
-        liquidityUsd: roundNicely(entry.liquidityUsd.toString()),
-        dayVolumeUsd: roundNicely(entry.dayVolumeUsd.toString())
+        liquidityUsd: roundNicely(entry.liquidityUsd ? entry.liquidityUsd.toString() : null),
+        dayVolumeUsd: roundNicely(entry.dayVolumeUsd ? entry.dayVolumeUsd.toString() : null)
     });
 });
 

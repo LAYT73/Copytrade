@@ -1,7 +1,7 @@
 const endpointV1 = 'https://graphql.bitquery.io';
 const endpointV2 = 'https://streaming.bitquery.io/graphql';
 
-const transfersByAdressesCount = 
+const transfersByAdressesCount =
 {
   endpoint: endpointV1,
   query: `query ($network: EthereumNetwork!, $addresses: [String!]!, $from: ISO8601DateTime, $till: ISO8601DateTime) {
@@ -12,6 +12,23 @@ const transfersByAdressesCount =
       success: true
     ) {
       count
+    }
+  }
+}
+`
+}
+
+const txByHash = {
+    endpoint: endpointV1,
+    query: `query ($network: EthereumNetwork!, $hashes: [String!]!) {
+  ethereum(network: $network) {
+    transactions(
+      txHash: {in: $hashes}
+    ) {
+      hash
+      gasValue
+      gasPrice
+      gasCostUSD: gasValue(in: USD)
     }
   }
 }
@@ -90,4 +107,4 @@ const buyersOfTokens = {
 `
 }
 
-module.exports = { transfersByAdressesCount, transfersByAdresses };
+module.exports = { transfersByAdressesCount, transfersByAdresses, txByHash };

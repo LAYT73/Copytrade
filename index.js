@@ -30,7 +30,7 @@ if (args[0] === '--bitquery') {
 let schedule = require('./services/scheduleService');
 schedule.init();
 
-const bot = new Telegraf(process.env.TELEGRAM_API_KEY, {handlerTimeout: 900_000}); // 10min
+const bot = new Telegraf(process.env.TELEGRAM_API_KEY, {handlerTimeout: 2_700_000}); // 30 min
 bot.start(startCmd);
 bot.command('addresses', addressesCmd);
 bot.command('buyers', buyersCmd);
